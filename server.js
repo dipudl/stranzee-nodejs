@@ -3,9 +3,35 @@ const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const multer = require("multer");
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, __dirname + "/uploads/");
+  },
+  filename: (req, file, cb) => {
+    // cb(null, file.originalname);
+    let profileId = new mongoose.Types.ObjectId();
+    let imageName = profileId._id.toHexString() + "." + file.mimetype.split("/")[1];
+    req.profileId = profileId;
+    cb(null, imageName);
+  },
+});
+
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype === "image/jpeg" || file.mimetype === "image/png") {
+    cb(null, true);
+  } else {
+    // cb(null, false);
+    cb(new Error("Wrong file type. Only jpeg or png file accepted."), false);
+  }
+};
+
+const upload = multer({ storage: storage, fileFilter: fileFilter });
 
 const app = express();
 app.use(express.json());
+app.use("/uploads", express.static("uploads"));
 const { User, Strangee } = require(__dirname + "/schema.js");
 
 const saltRounds = 10;
@@ -19,22 +45,26 @@ mongoose.connect("mongodb://localhost:27017/strangeeDB", {
 });
 
 app.post("/check_registration", (req, res) => {
-  let result = false;
+  let exists = false;
+  console.log(req.body);
 
   User.findOne({ email: req.body.email })
     .exec()
     .then((user) => {
-      console.log(user);
-      if (user) result = true;
+      if (user) {
+        exists = true;
+        console.log("User already exists.");
+      }
 
       return res.status(200).json({
-        user_exists: result,
+        user_not_exist: !exists,
       });
     });
 });
 
-app.post("/signup", (req, res) => {
-  console.log(req.body);
+app.post("/signup", upload.single("profileImage"), (req, res) => {
+  console.log("signup", req.body);
+  console.log("file", req.file);
 
   if (req.body.password.length < 6) {
     return res.status(500).json({
@@ -56,17 +86,21 @@ app.post("/signup", (req, res) => {
               error: err,
             });
           } else {
+            console.log("profileImageName", req.profileImageName);
+
             const user = new User({
-              _id: new mongoose.Types.ObjectId(),
+              _id: req.profileId,
               email: req.body.email,
               password: hash,
               firstName: req.body.firstName,
               lastName: req.body.lastName,
-              imageUrl: req.body.imageUrl,
+              imageUrl: `uploads/${req.file.filename}/`,
               country: req.body.country,
               gender: req.body.gender,
               interestedIn: req.body.interestedIn,
-              interestedInCaps: req.body.interestedIn.map(interest => interest.toUpperCase()),
+              interestedInCaps: req.body.interestedIn.map((interest) =>
+                interest.toUpperCase()
+              ),
               birthday: req.body.birthday,
               aboutMe: req.body.aboutMe,
             });
