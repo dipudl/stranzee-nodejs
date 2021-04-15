@@ -12,13 +12,15 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     // cb(null, file.originalname);
     let profileId = new mongoose.Types.ObjectId();
-    let imageName = profileId._id.toHexString() + "." + file.mimetype.split("/")[1];
+    let imageName =
+      profileId._id.toHexString() + "." + file.mimetype.split("/")[1];
     req.profileId = profileId;
     cb(null, imageName);
   },
 });
 
 const fileFilter = (req, file, cb) => {
+  console.log("mime", file.mimetype);
   if (file.mimetype === "image/jpeg" || file.mimetype === "image/png") {
     cb(null, true);
   } else {
@@ -43,6 +45,24 @@ mongoose.connect("mongodb://localhost:27017/strangeeDB", {
   useUnifiedTopology: true,
   useCreateIndex: true,
 });
+
+/* app.get("/bro", (req, res) => {
+  User.find({}).exec((err, users) => {
+    if(err) {
+      res.send("error");
+    }else{
+      "v".sub
+      users.forEach(user => {
+        if(!user.imageUrl.startsWith("uploads")) {
+          // user.imageUrl = user.imageUrl.substring(0, user.imageUrl.length-1);
+          // user.save();
+          user.delete();
+        }
+      });
+      res.send("success");
+    }
+  });
+}); */
 
 app.post("/check_registration", (req, res) => {
   let exists = false;
@@ -94,13 +114,13 @@ app.post("/signup", upload.single("profileImage"), (req, res) => {
               password: hash,
               firstName: req.body.firstName,
               lastName: req.body.lastName,
-              imageUrl: `uploads/${req.file.filename}/`,
+              imageUrl: `uploads/${req.file.filename}`,
               country: req.body.country,
               gender: req.body.gender,
-              interestedIn: req.body.interestedIn,
-              interestedInCaps: req.body.interestedIn.map((interest) =>
-                interest.toUpperCase()
-              ),
+              interestedIn: req.body.interestedIn.split(","),
+              interestedInCaps: req.body.interestedIn
+                .split(",")
+                .map((interest) => interest.toUpperCase()),
               birthday: req.body.birthday,
               aboutMe: req.body.aboutMe,
             });
@@ -142,6 +162,7 @@ app.post("/signup", upload.single("profileImage"), (req, res) => {
 });
 
 app.post("/login", (req, res) => {
+  console.log("Logging in...", req.body);
   User.find({ email: req.body.email })
     .exec()
     .then((users) => {
@@ -193,6 +214,7 @@ app.post("/login", (req, res) => {
 function filterStrangee(filterJson1, filterJson2, req, res, callback) {
   User.find(filterJson1)
     .find(filterJson2)
+    .find({ _id: { $ne: req.user_unique_data._id } })
     .select(
       "_id firstName lastName imageUrl country gender interestedIn birthday aboutMe"
     )
@@ -208,8 +230,9 @@ function filterStrangee(filterJson1, filterJson2, req, res, callback) {
           if (callback) {
             callback();
           } else {
+            console.log("USERS:::", users);
             return res.status(200).json({
-              data: users,
+              data: users.map((element) => calcSaved(element, req)),
             });
           }
         } else if (total_found >= FIND_STRANGEE_PAGINATION) {
@@ -219,14 +242,29 @@ function filterStrangee(filterJson1, filterJson2, req, res, callback) {
           );
 
           return res.status(200).json({
-            data: users,
+            data: users.map((element) => calcSaved(element, req)),
           });
         }
       }
     });
 }
 
-app.get("/strangee", ensureAuthorized, async (req, res) => {
+function calcSaved(element, req) {
+  const item = JSON.parse(JSON.stringify(element));
+  item.saved = false;
+
+  if (req.favouriteArray.includes(element._id)) {
+    item.saved = true;
+  }
+  return item;
+}
+
+app.get("/strangee", ensureAuthorized, (req, res) => {
+  console.log("Get strangee...");
+  console.log("USER DATA: ", req.query.user);
+
+  req.body = JSON.parse(req.query.user);
+
   let strangee_query = `{"$or": [`;
   req.body.interestedIn.forEach((interest, index) => {
     strangee_query += `{"interestedInCaps" : "${interest.toUpperCase()}"}`;
@@ -234,36 +272,85 @@ app.get("/strangee", ensureAuthorized, async (req, res) => {
   });
   strangee_query += "]}";
 
-  filterStrangee(
-    JSON.parse(strangee_query),
-    {
-      _id: { $ne: req.user_unique_data._id },
-      country: req.body.country,
-      birthday: {
-        $gte: parseInt(req.body.birthday) - FIND_STRANGEE_AGE_RADIUS,
-        $lte: parseInt(req.body.birthday) + FIND_STRANGEE_AGE_RADIUS,
-      },
-    },
-    req,
-    res,
-    () => {
-      filterStrangee(
-        {
-          _id: { $ne: req.user_unique_data._id },
-          birthday: {
-            $gte: parseInt(req.body.birthday) - FIND_STRANGEE_AGE_RADIUS,
-            $lte: parseInt(req.body.birthday) + FIND_STRANGEE_AGE_RADIUS,
+  User.findOne({ _id: req.user_unique_data._id })
+    .exec()
+    .then((user) => {
+      if (user) {
+        req.favouriteArray = user.favourite;
+
+        filterStrangee(
+          JSON.parse(strangee_query),
+          {
+            country: req.body.country,
+            birthday: {
+              $gte: parseInt(req.body.birthday) - FIND_STRANGEE_AGE_RADIUS,
+              $lte: parseInt(req.body.birthday) + FIND_STRANGEE_AGE_RADIUS,
+            },
           },
-        },
-        null,
-        req,
-        res,
-        () => {
-          filterStrangee(null, null, req, res, null);
+          req,
+          res,
+          () => {
+            filterStrangee(
+              {
+                birthday: {
+                  $gte: parseInt(req.body.birthday) - FIND_STRANGEE_AGE_RADIUS,
+                  $lte: parseInt(req.body.birthday) + FIND_STRANGEE_AGE_RADIUS,
+                },
+              },
+              null,
+              req,
+              res,
+              () => {
+                filterStrangee(null, null, req, res, null);
+              }
+            );
+          }
+        );
+      } else {
+        return res.status(401).json({
+          error: err,
+        });
+      }
+    });
+});
+
+app.post("/save", ensureAuthorized, (req, res) => {
+  User.findOne({ _id: req.user_unique_data._id })
+    .exec()
+    .then((user) => {
+      if (user) {
+        if (req.body.currentSavedStatus) {
+          user.favourite = user.favourite.splice(
+            user.favourite.indexOf(req.body.strangeeId),
+            1
+          );
+          // user.favourite = user.favourite.filter(i => i !== req.body.strangeeId);
+        } else {
+          user.favourite.push(req.body.strangeeId);
         }
-      );
-    }
-  );
+        user.save((err, savedUser) => {
+          if (err) {
+            return res.status(401).json({
+              userId: req.body.strangeeId,
+              error: true,
+              saveStatus: req.body.currentSavedStatus,
+            });
+          } else {
+            return res.status(200).json({
+              userId: req.body.strangeeId,
+              error: false,
+              saveStatus: !req.body.currentSavedStatus,
+            });
+          }
+        });
+      } else {
+        return res.status(401).json({
+          userId: req.body.strangeeId,
+          error: true,
+          saveStatus: req.body.currentSavedStatus,
+        });
+      }
+    });
 });
 
 app.post("/test", ensureAuthorized, (req, res) => {
