@@ -21,19 +21,28 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     // cb(null, file.originalname);
-  let imageName = "";
-  if(req.body._id) {
-    imageName = req.body._id + "." + file.mimetype.split("/")[1];
-    console.log("UserId provided... ProfileImage updated", imageName);
-  }else{
-    let profileId = new mongoose.Types.ObjectId();
-    imageName = profileId._id.toHexString() + "." + file.mimetype.split("/")[1];
-    req.profileId = profileId;
+    let imageName = "";
+    if (req.body._id) {
+      if (req.user_unique_data._id) {
+        imageName =
+          req.user_unique_data._id + "." + file.mimetype.split("/")[1];
+        console.log("UserId provided... ProfileImage updated", imageName);
+      } else {
+        console.log(
+          "Authentication error for profile image update...",
+          req.body._id
+        );
+      }
+    } else {
+      let profileId = new mongoose.Types.ObjectId();
+      imageName =
+        profileId._id.toHexString() + "." + file.mimetype.split("/")[1];
+      req.profileId = profileId;
 
-    console.log("UserId not provided... Image Uploaded");
-    console.log("UserId not provided... _id", req.body);
-    // console.log("UserId not provided... userId", req.body);
-  }
+      console.log("UserId not provided... Image Uploaded");
+      console.log("UserId not provided... _id", req.body);
+      // console.log("UserId not provided... userId", req.body);
+    }
 
     cb(null, imageName);
   },
@@ -93,11 +102,16 @@ app.post("/check_registration", (req, res) => {
     });
 });
 
-app.post("/profileImage", upload.single("profileImage"), (req, res) => {
-  console.log(req.file);
-  console.log("ID:::", req.body._id);
-  res.status(200).send(true);
-});
+app.post(
+  "/profileImage",
+  ensureAuthorized,
+  upload.single("profileImage"),
+  (req, res) => {
+    console.log(req.file);
+    console.log("ID:::", req.body._id);
+    res.status(200).send(true);
+  }
+);
 
 app.post("/signup", upload.single("profileImage"), (req, res) => {
   console.log("signup", req.body);
@@ -310,19 +324,19 @@ app.get("/strangee", ensureAuthorized, (req, res) => {
     .then((user) => {
       if (user) {
         req.favouriteArray = user.favourite;
-        console.log("Filter on type:", typeof(req.query.filterOn));
+        console.log("Filter on type:", typeof req.query.filterOn);
 
         if (req.query.filterOn == "true") {
           console.log("Filter on");
           let otherFilters = "{";
-          if(req.body.country != null && req.body.country != "Worldwide") {
-            otherFilters += `"country": "${req.body.country}"`
+          if (req.body.country != null && req.body.country != "Worldwide") {
+            otherFilters += `"country": "${req.body.country}"`;
 
-            if(GENDERS.includes(req.body.gender)) otherFilters += `,`;
+            if (GENDERS.includes(req.body.gender)) otherFilters += `,`;
           }
 
-          if(GENDERS.includes(req.body.gender)) {
-            otherFilters += `"gender": "${req.body.gender}"`
+          if (GENDERS.includes(req.body.gender)) {
+            otherFilters += `"gender": "${req.body.gender}"`;
           }
 
           otherFilters += "}";
@@ -334,7 +348,6 @@ app.get("/strangee", ensureAuthorized, (req, res) => {
             res,
             null
           );
-        
         } else {
           console.log("Filter off");
           filterStrangee(
@@ -421,7 +434,48 @@ app.post("/save", ensureAuthorized, (req, res) => {
     });
 });
 
-app.post("/test", ensureAuthorized, (req, res) => {
+
+app.post("/editDetails", ensureAuthorized, (req, res) => {
+  console.log("Edit details", req.body);
+
+  User.findOne({ _id: req.user_unique_data._id })
+    .exec()
+    .then((user) => {
+      if (user) {
+        user.firstName = req.body.firstName
+        user.lastName = req.body.lastName
+        user.country = req.body.country
+        user.gender = req.body.gender
+        user.interestedIn = req.body.interestedIn
+        user.interestedInCaps = req.body.interestedIn.map(x => x.toUpperCase())
+        user.birthday = req.body.birthday
+        user.aboutMe = req.body.aboutMe
+
+        user.save((err, savedUser) => {
+          if (err) {
+            return res.status(500).json({
+              error: err,
+            });
+          } else {
+            return res.status(200).send(true);
+          }
+        });
+      } else {
+        return res.status(401).json({
+          error: "Unauthorized request",
+        });
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(500).json({
+        error: err,
+      });
+    });
+})
+
+
+app.post("/token_test", ensureAuthorized, (req, res) => {
   res.status(200).json({
     unique_data: req.user_unique_data,
   });
@@ -431,6 +485,7 @@ app.post("/test", ensureAuthorized, (req, res) => {
 // Also need to implement refresh token to refresh access token without requiring user to log-out
 // Tutorial: https://www.youtube.com/watch?v=mbsmsi7l3r4
 function ensureAuthorized(req, res, next) {
+  console.log("Checking authorization...");
   var bearerToken;
   var bearerHeader = req.headers["authorization"];
   if (typeof bearerHeader !== "undefined") {
@@ -438,15 +493,18 @@ function ensureAuthorized(req, res, next) {
 
     jwt.verify(bearerToken, process.env.JWT_KEY, (err, jwt_data) => {
       if (err) {
+        console.log("Invalid authorization...", bearerToken);
         res.status(403).json({
           error: "Requested resource is forbidden",
         });
+      } else {
+        console.log("Valid authorization...", bearerToken);
+        req.user_unique_data = jwt_data;
+        next();
       }
-
-      req.user_unique_data = jwt_data;
-      next();
     });
   } else {
+    console.log("Invalid authorization...");
     res.status(403).json({
       error: "Requested resource is forbidden",
     });
