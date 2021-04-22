@@ -13,7 +13,7 @@ const GENDERS = ["Female", "Male", "Other"];
 const app = express();
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
-const { User, Strangee } = require(__dirname + "/schema.js");
+const { User, Report } = require(__dirname + "/schema.js");
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -24,8 +24,7 @@ const storage = multer.diskStorage({
     let imageName = "";
     if (req.body._id) {
       if (req.user_unique_data._id) {
-        imageName =
-          req.user_unique_data._id + "." + file.mimetype.split("/")[1];
+        imageName = req.user_unique_data._id; //+ "." + file.mimetype.split("/")[1];
         console.log("UserId provided... ProfileImage updated", imageName);
       } else {
         console.log(
@@ -35,8 +34,7 @@ const storage = multer.diskStorage({
       }
     } else {
       let profileId = new mongoose.Types.ObjectId();
-      imageName =
-        profileId._id.toHexString() + "." + file.mimetype.split("/")[1];
+      imageName = profileId._id.toHexString(); //+ "." + file.mimetype.split("/")[1];
       req.profileId = profileId;
 
       console.log("UserId not provided... Image Uploaded");
@@ -434,7 +432,6 @@ app.post("/save", ensureAuthorized, (req, res) => {
     });
 });
 
-
 app.post("/editDetails", ensureAuthorized, (req, res) => {
   console.log("Edit details", req.body);
 
@@ -442,14 +439,16 @@ app.post("/editDetails", ensureAuthorized, (req, res) => {
     .exec()
     .then((user) => {
       if (user) {
-        user.firstName = req.body.firstName
-        user.lastName = req.body.lastName
-        user.country = req.body.country
-        user.gender = req.body.gender
-        user.interestedIn = req.body.interestedIn
-        user.interestedInCaps = req.body.interestedIn.map(x => x.toUpperCase())
-        user.birthday = req.body.birthday
-        user.aboutMe = req.body.aboutMe
+        user.firstName = req.body.firstName;
+        user.lastName = req.body.lastName;
+        user.country = req.body.country;
+        user.gender = req.body.gender;
+        user.interestedIn = req.body.interestedIn;
+        user.interestedInCaps = req.body.interestedIn.map((x) =>
+          x.toUpperCase()
+        );
+        user.birthday = req.body.birthday;
+        user.aboutMe = req.body.aboutMe;
 
         user.save((err, savedUser) => {
           if (err) {
@@ -472,7 +471,294 @@ app.post("/editDetails", ensureAuthorized, (req, res) => {
         error: err,
       });
     });
-})
+});
+
+
+app.post("/removeSaved", ensureAuthorized, (req, res) => {
+  console.log("Edit details", req.query);
+
+  User.findOne({ _id: req.user_unique_data._id })
+    .exec()
+    .then((user) => {
+      if (user) {
+        user.favourite.splice(user.favourite.indexOf(req.query.savedUserId), 1);
+
+        user.save((err, savedUser) => {
+          if (err) {
+            return res.status(500).json({
+              error: err,
+            });
+          } else {
+            return res.status(200).send(true);
+          }
+        });
+      } else {
+        return res.status(401).json({
+          error: "Unauthorized request",
+        });
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(500).json({
+        error: err,
+      });
+    });
+});
+
+
+app.post("/removeWhoCheckedMe", ensureAuthorized, (req, res) => {
+  console.log("Remove who checked me", req.query);
+
+  User.findOne({ _id: req.user_unique_data._id })
+    .exec()
+    .then((user) => {
+      if (user) {
+        user.whoCheckedMe.splice(user.whoCheckedMe.indexOf(req.query._id), 1);
+
+        user.save((err, savedUser) => {
+          if (err) {
+            return res.status(500).json({
+              error: err,
+            });
+          } else {
+            return res.status(200).send(true);
+          }
+        });
+      } else {
+        return res.status(401).json({
+          error: "Unauthorized request",
+        });
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(500).json({
+        error: err,
+      });
+    });
+});
+
+
+app.get("/saved", ensureAuthorized, (req, res) => {
+  User.findOne({ _id: req.user_unique_data._id })
+    .exec()
+    .then((user) => {
+      if (user) {
+        const savedUsersId = user.favourite;
+
+        User.find({ _id: { $in: savedUsersId } })
+          .select(
+            "_id firstName lastName imageUrl country gender interestedIn birthday aboutMe createdAt"
+          )
+          .exec((error, users) => {
+            if (error) {
+              res.status(500).json({
+                error: error,
+              });
+            } else {
+              res.status(200).send(
+                users.map((element) => {
+                  const item = JSON.parse(JSON.stringify(element));
+                  item.saved = true;
+                  return item;
+                })
+              );
+            }
+          });
+      } else {
+        return res.status(401).json({
+          error: "Unauthorized request",
+        });
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(500).json({
+        error: err,
+      });
+    });
+});
+
+
+app.get("/whoCheckedMe", ensureAuthorized, (req, res) => {
+
+  User.findOne({ _id: req.user_unique_data._id })
+    .exec()
+    .then((user) => {
+      if (user) {
+        const favouriteIds = user.favourite
+        const whoCheckedMeIds = user.whoCheckedMe;
+
+        User.find({ _id: { $in: whoCheckedMeIds } })
+          .select(
+            "_id firstName lastName imageUrl country gender interestedIn birthday aboutMe createdAt"
+          )
+          .exec((error, users) => {
+            if (error) {
+              res.status(500).json({
+                error: error,
+              });
+            } else {
+              res.status(200).send(
+                users.map((element) => {
+                  const item = JSON.parse(JSON.stringify(element));
+                  item.saved = favouriteIds.includes(element._id);
+                  return item;
+                })
+              );
+            }
+          });
+      } else {
+        return res.status(401).json({
+          error: "Unauthorized request",
+        });
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(500).json({
+        error: err,
+      });
+    });
+});
+
+
+app.get("/blocked", ensureAuthorized, (req, res) => {
+  User.findOne({ _id: req.user_unique_data._id })
+    .exec()
+    .then((user) => {
+
+      if (user) {
+        if(user.blocked.includes(req.query._id)) {
+          res.status(200).send(true);
+        } else {
+          res.status(200).send(false);
+        }
+      } else {
+        return res.status(401).json({
+          error: "Unauthorized request",
+        });
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(500).json({
+        error: err,
+      });
+    });
+});
+
+
+app.post("/block", ensureAuthorized, (req, res) => {
+  console.log(req.query);
+  const blockedStatus = (req.query.blockedStatus == "true");
+
+  User.findOne({ _id: req.user_unique_data._id })
+    .exec()
+    .then((user) => {
+      if (user) {
+        if (req.query.blockedStatus == "true") {
+          user.blocked.splice(user.blocked.indexOf(req.query._id), 1);
+        } else {
+          if(!user.blocked.includes(req.query._id)) {
+            user.blocked.push(req.query._id);
+          }
+        }
+
+        user.save((error, savedUser) => {
+          if (error) {
+            return res.status(200).json({
+              userId: req.query._id,
+              error: true,
+              blockedStatus: blockedStatus,
+            });
+          } else {
+            return res.status(200).json({
+              userId: req.query._id,
+              error: false,
+              blockedStatus: !blockedStatus,
+            });
+          }
+        });
+      } else {
+        return res.status(200).json({
+          userId: req.query._id,
+          error: true,
+          blockedStatus: blockedStatus,
+        });
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+      return res.status(200).json({
+        userId: req.query._id,
+        error: true,
+        blockedStatus: blockedStatus,
+      });
+    });
+});
+
+
+app.post("/whoCheckedMe", ensureAuthorized, (req, res) => {
+  console.log("Who checked me");
+  console.log(req.query);
+
+  User.findOne({ _id: req.user_unique_data._id }, (err, user) => {
+    if(err) {
+      res.status(500).send(false);
+    } else {
+      User.findOne({ _id: req.query._id }, (error, foundUser)=> {
+        if(error) {
+          res.status(500).send(false);
+        } else {
+          if(!foundUser.whoCheckedMe.includes(req.user_unique_data._id)) {
+            foundUser.whoCheckedMe.push(req.user_unique_data._id);
+          }
+
+          foundUser.save((e, savedUser) => {
+            if(e) {
+              res.status(500).send(false);
+            } else {
+              res.status(200).send(true);
+            }
+          });
+        }
+      });
+    }
+  });
+});
+
+
+app.post("/report", ensureAuthorized, (req, res) => {
+  User.findOne({ _id: req.user_unique_data._id })
+    .exec()
+    .then((user) => {
+
+      if (user) {
+        const report = new Report({
+          _id: new mongoose.Types.ObjectId(),
+          reportedBy: req.user_unique_data._id,
+          reportedUser: req.query.reportedUserId,
+          message: req.query.message,
+        });
+
+        report.save((error, savedReport) => {
+          if(error) {
+            return res.status(200).send(false);
+          } else {
+            return res.status(200).send(true);
+          }
+        });
+      } else {
+        return res.status(200).send(false);
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(200).send(false);
+    });
+});
 
 
 app.post("/token_test", ensureAuthorized, (req, res) => {

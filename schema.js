@@ -25,9 +25,23 @@ const userSchema = new mongoose.Schema(
     interestedInCaps: { type: [String], required: true },
     birthday: { type: Number, required: true },
     aboutMe: { type: String, required: true },
-    favourite: { type: [String], default: [] }
+    favourite: { type: [String], default: [] },
+    blocked: { type: [String], default: [] },
+    whoCheckedMe: { type: [String], default: [] }
   },
   { timestamps: true }
 );
 
+const reportSchema = new mongoose.Schema(
+  {
+    _id: mongoose.Schema.Types.ObjectId,
+    reportedBy: { type: String, required: true },
+    reportedUser: { type: String, required: true },
+    message: { type: String, required: true },
+  },
+  { timestamps: true }
+);
+
+
 module.exports.User = mongoose.model("User", userSchema);
+module.exports.Report = mongoose.model("Report", reportSchema);
