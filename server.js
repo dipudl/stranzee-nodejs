@@ -4,16 +4,19 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
+const app = express();
+const server = require("http").createServer(app);
+const io = require("socket.io")(server);
 
+app.use(express.json());
+app.use("/uploads", express.static("uploads"));
+
+const { User, Report } = require(__dirname + "/schema.js");
 const saltRounds = 10;
 const FIND_STRANGEE_PAGINATION = 30;
 const FIND_STRANGEE_AGE_RADIUS = 10 * 365 * 86400 * 1000;
 const GENDERS = ["Female", "Male", "Other"];
-
-const app = express();
-app.use(express.json());
-app.use("/uploads", express.static("uploads"));
-const { User, Report } = require(__dirname + "/schema.js");
+const statusData = {};
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -58,7 +61,7 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ storage: storage, fileFilter: fileFilter });
 
-mongoose.connect("mongodb://localhost:27017/strangeeDB", {
+mongoose.connect(process.env.MONGODB_URL, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   useCreateIndex: true,
@@ -168,7 +171,7 @@ app.post("/signup", upload.single("profileImage"), (req, res) => {
                   },
                   process.env.JWT_KEY,
                   {
-                    expiresIn: "90d",
+                    // expiresIn: "90d",
                   }
                 );
 
@@ -217,7 +220,7 @@ app.post("/login", (req, res) => {
             },
             process.env.JWT_KEY,
             {
-              expiresIn: "90d",
+              // expiresIn: "90d"
             }
           );
 
@@ -266,7 +269,6 @@ function filterStrangee(filterJson1, filterJson2, req, res, callback) {
           if (callback) {
             callback();
           } else {
-            console.log("USERS:::", users);
             return res.status(200).json({
               data: users.map((element) => calcSaved(element, req)),
               createdAt:
@@ -473,7 +475,6 @@ app.post("/editDetails", ensureAuthorized, (req, res) => {
     });
 });
 
-
 app.post("/removeSaved", ensureAuthorized, (req, res) => {
   console.log("Edit details", req.query);
 
@@ -506,7 +507,6 @@ app.post("/removeSaved", ensureAuthorized, (req, res) => {
     });
 });
 
-
 app.post("/removeWhoCheckedMe", ensureAuthorized, (req, res) => {
   console.log("Remove who checked me", req.query);
 
@@ -538,7 +538,6 @@ app.post("/removeWhoCheckedMe", ensureAuthorized, (req, res) => {
       });
     });
 });
-
 
 app.get("/saved", ensureAuthorized, (req, res) => {
   User.findOne({ _id: req.user_unique_data._id })
@@ -580,14 +579,12 @@ app.get("/saved", ensureAuthorized, (req, res) => {
     });
 });
 
-
 app.get("/whoCheckedMe", ensureAuthorized, (req, res) => {
-
   User.findOne({ _id: req.user_unique_data._id })
     .exec()
     .then((user) => {
       if (user) {
-        const favouriteIds = user.favourite
+        const favouriteIds = user.favourite;
         const whoCheckedMeIds = user.whoCheckedMe;
 
         User.find({ _id: { $in: whoCheckedMeIds } })
@@ -623,14 +620,12 @@ app.get("/whoCheckedMe", ensureAuthorized, (req, res) => {
     });
 });
 
-
 app.get("/blocked", ensureAuthorized, (req, res) => {
   User.findOne({ _id: req.user_unique_data._id })
     .exec()
     .then((user) => {
-
       if (user) {
-        if(user.blocked.includes(req.query._id)) {
+        if (user.blocked.includes(req.query._id)) {
           res.status(200).send(true);
         } else {
           res.status(200).send(false);
@@ -649,10 +644,9 @@ app.get("/blocked", ensureAuthorized, (req, res) => {
     });
 });
 
-
 app.post("/block", ensureAuthorized, (req, res) => {
   console.log(req.query);
-  const blockedStatus = (req.query.blockedStatus == "true");
+  const blockedStatus = req.query.blockedStatus == "true";
 
   User.findOne({ _id: req.user_unique_data._id })
     .exec()
@@ -661,7 +655,7 @@ app.post("/block", ensureAuthorized, (req, res) => {
         if (req.query.blockedStatus == "true") {
           user.blocked.splice(user.blocked.indexOf(req.query._id), 1);
         } else {
-          if(!user.blocked.includes(req.query._id)) {
+          if (!user.blocked.includes(req.query._id)) {
             user.blocked.push(req.query._id);
           }
         }
@@ -699,25 +693,24 @@ app.post("/block", ensureAuthorized, (req, res) => {
     });
 });
 
-
 app.post("/whoCheckedMe", ensureAuthorized, (req, res) => {
   console.log("Who checked me");
   console.log(req.query);
 
   User.findOne({ _id: req.user_unique_data._id }, (err, user) => {
-    if(err) {
+    if (err) {
       res.status(500).send(false);
     } else {
-      User.findOne({ _id: req.query._id }, (error, foundUser)=> {
-        if(error) {
+      User.findOne({ _id: req.query._id }, (error, foundUser) => {
+        if (error) {
           res.status(500).send(false);
         } else {
-          if(!foundUser.whoCheckedMe.includes(req.user_unique_data._id)) {
+          if (!foundUser.whoCheckedMe.includes(req.user_unique_data._id)) {
             foundUser.whoCheckedMe.push(req.user_unique_data._id);
           }
 
           foundUser.save((e, savedUser) => {
-            if(e) {
+            if (e) {
               res.status(500).send(false);
             } else {
               res.status(200).send(true);
@@ -729,12 +722,10 @@ app.post("/whoCheckedMe", ensureAuthorized, (req, res) => {
   });
 });
 
-
 app.post("/report", ensureAuthorized, (req, res) => {
   User.findOne({ _id: req.user_unique_data._id })
     .exec()
     .then((user) => {
-
       if (user) {
         const report = new Report({
           _id: new mongoose.Types.ObjectId(),
@@ -744,7 +735,7 @@ app.post("/report", ensureAuthorized, (req, res) => {
         });
 
         report.save((error, savedReport) => {
-          if(error) {
+          if (error) {
             return res.status(200).send(false);
           } else {
             return res.status(200).send(true);
@@ -759,7 +750,6 @@ app.post("/report", ensureAuthorized, (req, res) => {
       res.status(200).send(false);
     });
 });
-
 
 app.post("/token_test", ensureAuthorized, (req, res) => {
   res.status(200).json({
@@ -797,10 +787,67 @@ function ensureAuthorized(req, res, next) {
   }
 }
 
+function jwtVerify(token, callback) {
+  jwt.verify(token, process.env.JWT_KEY, (err, jwt_data) => {
+    if (err) {
+      console.log("JWT: Invalid authorization...", token);
+    } else {
+      callback(jwt_data._id);
+    }
+  });
+}
+
+io.on("connection", (socket) => {
+  console.log(`Connection : SocketId = ${socket.id}`);
+
+  socket.on("status", (status_data) => {
+    const data = JSON.parse(status_data);
+
+    jwtVerify(data.token, (userId) => {
+      statusData[userId] = data.status;
+      // send status to data.userId room where some receivers are listening to this user's status
+      io.to(`${userId}`).emit("statusChange", data.status);
+    });
+  });
+
+  socket.on("subscribe", (subscribe_data) => {
+    const data = JSON.parse(subscribe_data);
+    const roomName = data.roomName;
+
+    jwtVerify(data.token, (userId) => {
+      socket.join(`${roomName}`);
+      console.log(
+        `Username : ${userId} joined Room Name : ${subscribe_data}`
+      );
+
+      if (data.purpose == "status") {
+        io.to(`${roomName}`).emit(
+          "statusChange",
+          statusData[roomName] || "offline"
+        );
+      }
+    });
+  });
+
+  socket.on("unsubscribe", (unsubscribe_data) => {
+    const data = JSON.parse(unsubscribe_data);
+    const roomName = data.roomName;
+
+    jwtVerify(data.token, (userId) => {
+      socket.leave(`${roomName}`);
+      console.log(`Username : ${userId} leaved Room Name : ${roomName}`);
+    });
+  });
+});
+
 process.on("uncaughtException", (err) => {
   console.log(err);
 });
 
-app.listen(process.env.PORT | 3000, () => {
+server.listen(process.env.PORT | 3000, () => {
   console.log("Server started at port 3000...");
 });
+
+/* app.listen(process.env.PORT | 3000, () => {
+  console.log("Server started at port 3000...");
+}); */
