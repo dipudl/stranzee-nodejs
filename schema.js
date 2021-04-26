@@ -27,7 +27,7 @@ const userSchema = new mongoose.Schema(
     aboutMe: { type: String, required: true },
     favourite: { type: [String], default: [] },
     blocked: { type: [String], default: [] },
-    whoCheckedMe: { type: [String], default: [] }
+    whoCheckedMe: { type: [String], default: [] },
   },
   { timestamps: true }
 );
@@ -42,6 +42,19 @@ const reportSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+const messageSchema = new mongoose.Schema(
+  {
+    _id: mongoose.Schema.Types.ObjectId,
+    userId: { type: String, required: true },
+    strangeeId: { type: String, required: true },
+    text: String,
+    type: { type: String, required: true },
+    imageUrl: String,
+    timestamp: { type: Number, required: true },
+  },
+  { timestamps: true }
+);
 
 module.exports.User = mongoose.model("User", userSchema);
 module.exports.Report = mongoose.model("Report", reportSchema);
+module.exports.Message = mongoose.model("Message", messageSchema);

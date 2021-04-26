@@ -11,10 +11,11 @@ const io = require("socket.io")(server);
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
-const { User, Report } = require(__dirname + "/schema.js");
+const { User, Report, Message } = require(__dirname + "/schema.js");
 const saltRounds = 10;
 const FIND_STRANGEE_PAGINATION = 30;
 const FIND_STRANGEE_AGE_RADIUS = 10 * 365 * 86400 * 1000;
+const MESSAGE_PAGINATION = 20;
 const GENDERS = ["Female", "Male", "Other"];
 const statusData = {};
 
@@ -66,6 +67,7 @@ mongoose.connect(process.env.MONGODB_URL, {
   useUnifiedTopology: true,
   useCreateIndex: true,
 });
+const connection = mongoose.connection;
 
 /* app.get("/bro", (req, res) => {
   User.find({}).exec((err, users) => {
@@ -111,6 +113,16 @@ app.post(
     console.log(req.file);
     console.log("ID:::", req.body._id);
     res.status(200).send(true);
+  }
+);
+
+app.post(
+  "/imageUpload",
+  ensureAuthorized,
+  upload.single("imageByUser"),
+  (req, res) => {
+    console.log(req.file);
+    res.status(200).json(`uploads/${req.file.filename}`);
   }
 );
 
@@ -792,50 +804,112 @@ function jwtVerify(token, callback) {
     if (err) {
       console.log("JWT: Invalid authorization...", token);
     } else {
-      callback(jwt_data._id);
+      callback(jwt_data._id.toString());
     }
   });
 }
 
-io.on("connection", (socket) => {
-  console.log(`Connection : SocketId = ${socket.id}`);
+connection.once("open", () => {
+  io.on("connection", (socket) => {
+    console.log(`Connection : SocketId = ${socket.id}`);
 
-  socket.on("status", (status_data) => {
-    const data = JSON.parse(status_data);
+    socket.on("status", (status_data) => {
+      const data = JSON.parse(status_data);
 
-    jwtVerify(data.token, (userId) => {
-      statusData[userId] = data.status;
-      // send status to data.userId room where some receivers are listening to this user's status
-      io.to(`${userId}`).emit("statusChange", data.status);
+      jwtVerify(data.token, (userId) => {
+        statusData[userId] = data.status;
+        // send status to data.userId room where some receivers are listening to this user's status
+        io.to(`${userId}`).emit("statusChange", data.status);
+      });
     });
-  });
 
-  socket.on("subscribe", (subscribe_data) => {
-    const data = JSON.parse(subscribe_data);
-    const roomName = data.roomName;
+    socket.on("message", (message_data) => {
+      const data = JSON.parse(message_data);
+      const strangeeId = data.message.strangeeId.toString();
 
-    jwtVerify(data.token, (userId) => {
-      socket.join(`${roomName}`);
-      console.log(
-        `Username : ${userId} joined Room Name : ${subscribe_data}`
-      );
+      jwtVerify(data.token, (userId) => {
+        let roomName = "";
 
-      if (data.purpose == "status") {
-        io.to(`${roomName}`).emit(
-          "statusChange",
-          statusData[roomName] || "offline"
-        );
-      }
+        if (userId < strangeeId) {
+          roomName = userId + strangeeId;
+        } else {
+          roomName = strangeeId + userId;
+        }
+
+        data.message.timestamp = Date.now();
+        data.message._id = new mongoose.Types.ObjectId().toHexString();
+        io.to(roomName).emit("new message", [data.message]);
+
+        const message = new Message(data.message);
+        message.save();
+
+        console.log(data.message);
+      });
     });
-  });
 
-  socket.on("unsubscribe", (unsubscribe_data) => {
-    const data = JSON.parse(unsubscribe_data);
-    const roomName = data.roomName;
+    socket.on("subscribe", (subscribe_data) => {
+      const data = JSON.parse(subscribe_data);
+      const strangeeId = data.strangeeId.toString();
 
-    jwtVerify(data.token, (userId) => {
-      socket.leave(`${roomName}`);
-      console.log(`Username : ${userId} leaved Room Name : ${roomName}`);
+      jwtVerify(data.token, (userId) => {
+        let roomName = "";
+
+        if (data.purpose == "status") {
+          roomName = strangeeId;
+
+          socket.join(roomName);
+          io.to(roomName).emit(
+            "statusChange",
+            statusData[roomName] || "offline"
+          );
+        } else if (data.purpose == "chat") {
+          if (userId < strangeeId) {
+            roomName = userId + strangeeId;
+          } else {
+            roomName = strangeeId + userId;
+          }
+
+          // query database for previous chat data at roomName & then join room name
+          Message.find({
+            userId: userId,
+            strangeeId: strangeeId,
+          })
+            .sort("createdAt")
+            .limit(MESSAGE_PAGINATION)
+            .exec((error, messages) => {
+              socket.join(roomName);
+              if (error) {
+                console.log(error);
+              } else {
+                io.to(roomName).emit("older messages", messages);
+              }
+            });
+        }
+
+        console.log(`Username : ${userId} joined : ${subscribe_data}`);
+      });
+    });
+
+    socket.on("unsubscribe", (unsubscribe_data) => {
+      const data = JSON.parse(unsubscribe_data);
+      const strangeeId = data.strangeeId.toString();
+
+      jwtVerify(data.token, (userId) => {
+        let roomName = "";
+
+        if (data.purpose == "status") {
+          roomName = strangeeId;
+        } else if (data.purpose == "chat") {
+          if (userId < strangeeId) {
+            roomName = userId + strangeeId;
+          } else {
+            roomName = strangeeId + userId;
+          }
+        }
+
+        socket.leave(roomName);
+        console.log(`Username : ${userId} leaved Room Name : ${roomName}`);
+      });
     });
   });
 });
