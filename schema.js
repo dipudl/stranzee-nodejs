@@ -55,6 +55,30 @@ const messageSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+const chatSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true },
+    userId: { type: String, required: true },
+    strangeeId: { type: String, required: true },
+    imageUrl: { type: String, required: true },
+    timestamp: { type: Number, required: true },
+    message: { type: String, required: true },
+    isRead: { type: Boolean, required: true, default: false},
+
+    // not required, fetched when needed (for fresh data)
+    firstName: { type: String, required: false },
+    lastName: { type: String, required: false },
+    country: { type: String, required: false },
+    gender: { type: String, required: false },
+    interestedIn: { type: [String], required: false },
+    birthday: { type: Number, required: false },
+    aboutMe: { type: String, required: false },
+    isOnline: { type: Boolean, required: false}
+  },
+  { timestamps: true }
+);
+
 module.exports.User = mongoose.model("User", userSchema);
 module.exports.Report = mongoose.model("Report", reportSchema);
 module.exports.Message = mongoose.model("Message", messageSchema);
+module.exports.Chat = mongoose.model("Chat", chatSchema);

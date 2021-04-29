@@ -4,6 +4,8 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
+const { read } = require("fs");
+const { Console } = require("console");
 const app = express();
 const server = require("http").createServer(app);
 const io = require("socket.io")(server);
@@ -11,7 +13,7 @@ const io = require("socket.io")(server);
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
-const { User, Report, Message } = require(__dirname + "/schema.js");
+const { User, Report, Message, Chat } = require(__dirname + "/schema.js");
 const saltRounds = 10;
 const FIND_STRANGEE_PAGINATION = 30;
 const FIND_STRANGEE_AGE_RADIUS = 10 * 365 * 86400 * 1000;
@@ -66,6 +68,7 @@ mongoose.connect(process.env.MONGODB_URL, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   useCreateIndex: true,
+  useFindAndModify: false,
 });
 const connection = mongoose.connection;
 
@@ -763,6 +766,91 @@ app.post("/report", ensureAuthorized, (req, res) => {
     });
 });
 
+app.get("/message", ensureAuthorized, (req, res) => {
+  Message.find({
+    $or: [
+      {
+        userId: req.query.userId,
+        strangeeId: req.query.strangeeId,
+      },
+      {
+        userId: req.query.strangeeId,
+        strangeeId: req.query.userId,
+      },
+    ],
+    createdAt: {
+      $lt:
+        req.query.lastCreatedAt == "0" ? Date.now() : req.query.lastCreatedAt,
+    },
+  })
+    .sort("-createdAt")
+    .limit(MESSAGE_PAGINATION)
+    .exec((error, messages) => {
+      if (error) {
+        console.log(error);
+      } else {
+        res.status(200).json(messages.reverse());
+      }
+    });
+});
+
+app.get("/chat", ensureAuthorized, async (req, res) => {
+  User.findOne({ _id: req.user_unique_data._id }, async (err, user) => {
+    if (err) {
+      console.log(err);
+      res.status(500).json({
+        error: err,
+      });
+    } else {
+      req.favouriteArray = user.favourite;
+
+      Chat.find({ userId: req.user_unique_data._id })
+        .sort("-timestamp")
+        .exec(async (error, chats) => {
+          if (error) {
+            console.log(error);
+            res.status(500).json({
+              error: error,
+            });
+          } else {
+            const filteredChatArray = [];
+
+            for (let i = 0; i < chats.length; i++) {
+              chats[i].isOnline = statusData[chats[i].strangeeId] == "online";
+
+              try {
+                const strangee = await User.findOne({
+                  _id: chats[i].strangeeId,
+                }).exec();
+
+                if (strangee) {
+                  chats[i].firstName = strangee.firstName;
+                  chats[i].lastName = strangee.lastName;
+                  chats[i].country = strangee.country;
+                  chats[i].gender = strangee.gender;
+                  chats[i].interestedIn = strangee.interestedIn;
+                  chats[i].birthday = strangee.birthday;
+                  chats[i].aboutMe = strangee.aboutMe;
+
+                  filteredChatArray.push(chats[i]);
+                  console.log(chats[i]);
+                }
+              } catch (e) {
+                console.log(e);
+              }
+            }
+          
+            res
+              .status(200)
+              .json(
+                filteredChatArray.map((element) => calcSaved(element, req))
+              );
+          }
+        });
+    }
+  });
+});
+
 app.post("/token_test", ensureAuthorized, (req, res) => {
   res.status(200).json({
     unique_data: req.user_unique_data,
@@ -836,14 +924,64 @@ connection.once("open", () => {
           roomName = strangeeId + userId;
         }
 
-        data.message.timestamp = Date.now();
+        const timestamp = Date.now();
+        data.message.timestamp = timestamp;
         data.message._id = new mongoose.Types.ObjectId().toHexString();
         io.to(roomName).emit("new message", [data.message]);
 
         const message = new Message(data.message);
         message.save();
 
+        console.log("Room :::", roomName);
+
+        const myChat = {
+          _id: userId + strangeeId,
+          userId: userId,
+          strangeeId: strangeeId,
+          imageUrl: `uploads/${strangeeId}`,
+          timestamp: timestamp,
+          isRead: true,
+          message:
+            data.message.type == "image"
+              ? "You sent a photo."
+              : `You: ${data.message.text.slice(0, 100)}`,
+        };
+
+        const strangeeChat = {
+          _id: strangeeId + userId,
+          userId: strangeeId,
+          strangeeId: userId,
+          imageUrl: `uploads/${userId}`,
+          timestamp: timestamp,
+          isRead: false,
+          message:
+            data.message.type == "image"
+              ? "Sent a photo."
+              : data.message.text.slice(0, 100),
+        };
+
+        Chat.findOneAndUpdate({ _id: userId + strangeeId }, myChat, {
+          upsert: true,
+        }).exec();
+        Chat.findOneAndUpdate({ _id: strangeeId + userId }, strangeeChat, {
+          upsert: true,
+        }).exec();
+
         console.log(data.message);
+      });
+    });
+
+    socket.on("message read", (read_data) => {
+      const data = JSON.parse(read_data);
+      const strangeeId = data.strangeeId.toString();
+
+      jwtVerify(data.token, (userId) => {
+        Chat.updateOne({
+          userId: userId,
+          strangeeId: strangeeId
+        }, {
+          isRead: true
+        }).exec();
       });
     });
 
@@ -868,24 +1006,9 @@ connection.once("open", () => {
           } else {
             roomName = strangeeId + userId;
           }
-
-          // query database for previous chat data at roomName & then join room name
-          Message.find({
-            userId: userId,
-            strangeeId: strangeeId,
-          })
-            .sort("createdAt")
-            .limit(MESSAGE_PAGINATION)
-            .exec((error, messages) => {
-              socket.join(roomName);
-              if (error) {
-                console.log(error);
-              } else {
-                io.to(roomName).emit("older messages", messages);
-              }
-            });
         }
 
+        socket.join(roomName);
         console.log(`Username : ${userId} joined : ${subscribe_data}`);
       });
     });
