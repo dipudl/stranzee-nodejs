@@ -4,8 +4,6 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
-const { read } = require("fs");
-const { Console } = require("console");
 const app = express();
 const server = require("http").createServer(app);
 const io = require("socket.io")(server);
@@ -18,6 +16,9 @@ const saltRounds = 10;
 const FIND_STRANGEE_PAGINATION = 30;
 const FIND_STRANGEE_AGE_RADIUS = 10 * 365 * 86400 * 1000;
 const MESSAGE_PAGINATION = 20;
+const JWT_EXPIRATION_PERIOD = "30d";
+const JWT_CHANGE_PERIOD = 7 * 86400000;
+const JWT_APP_RESTART_PERIOD = 86400000 / 3;
 const GENDERS = ["Female", "Male", "Other"];
 const statusData = {};
 
@@ -186,14 +187,23 @@ app.post("/signup", upload.single("profileImage"), (req, res) => {
                   },
                   process.env.JWT_KEY,
                   {
-                    // expiresIn: "90d",
+                    expiresIn: JWT_EXPIRATION_PERIOD,
                   }
+                );
+
+                const refreshToken = jwt.sign(
+                  {
+                    _id: result._id,
+                    email: result.email,
+                  },
+                  process.env.JWT_REFRESH_KEY
                 );
 
                 return res.status(201).json({
                   message: "User created",
                   data: result,
                   token: token,
+                  refreshToken: refreshToken,
                 });
               })
               .catch((err) => {
@@ -209,7 +219,6 @@ app.post("/signup", upload.single("profileImage"), (req, res) => {
 });
 
 app.post("/login", (req, res) => {
-  console.log("Logging in...", req.body);
   User.find({ email: req.body.email })
     .exec()
     .then((users) => {
@@ -235,14 +244,23 @@ app.post("/login", (req, res) => {
             },
             process.env.JWT_KEY,
             {
-              // expiresIn: "90d"
+              expiresIn: JWT_EXPIRATION_PERIOD,
             }
+          );
+
+          const refreshToken = jwt.sign(
+            {
+              _id: users[0]._id,
+              email: users[0].email,
+            },
+            process.env.JWT_REFRESH_KEY
           );
 
           return res.status(200).json({
             message: "Authentication successful",
             data: users[0],
             token: token,
+            refreshToken: refreshToken,
           });
         }
         return res.status(401).json({
@@ -635,6 +653,30 @@ app.get("/whoCheckedMe", ensureAuthorized, (req, res) => {
     });
 });
 
+app.get("/amIBlocked", ensureAuthorized, (req, res) => {
+  User.findOne({ _id: req.query.strangeeId })
+    .exec()
+    .then((user) => {
+      if (user) {
+        if (user.blocked.includes(req.user_unique_data._id)) {
+          res.status(200).send(true);
+        } else {
+          res.status(200).send(false);
+        }
+      } else {
+        return res.status(401).json({
+          error: "Unauthorized request",
+        });
+      }
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(500).json({
+        error: err,
+      });
+    });
+});
+
 app.get("/blocked", ensureAuthorized, (req, res) => {
   User.findOne({ _id: req.user_unique_data._id })
     .exec()
@@ -662,16 +704,18 @@ app.get("/blocked", ensureAuthorized, (req, res) => {
 app.post("/block", ensureAuthorized, (req, res) => {
   console.log(req.query);
   const blockedStatus = req.query.blockedStatus == "true";
+  const myUserId = req.user_unique_data._id;
+  const strangeeId = req.query._id;
 
-  User.findOne({ _id: req.user_unique_data._id })
+  User.findOne({ _id: myUserId })
     .exec()
     .then((user) => {
       if (user) {
         if (req.query.blockedStatus == "true") {
-          user.blocked.splice(user.blocked.indexOf(req.query._id), 1);
+          user.blocked.splice(user.blocked.indexOf(strangeeId), 1);
         } else {
-          if (!user.blocked.includes(req.query._id)) {
-            user.blocked.push(req.query._id);
+          if (!user.blocked.includes(strangeeId)) {
+            user.blocked.push(strangeeId);
           }
         }
 
@@ -683,16 +727,36 @@ app.post("/block", ensureAuthorized, (req, res) => {
               blockedStatus: blockedStatus,
             });
           } else {
-            return res.status(200).json({
-              userId: req.query._id,
+            res.status(200).json({
+              userId: strangeeId,
               error: false,
               blockedStatus: !blockedStatus,
             });
+
+            let roomName = "";
+
+            if (myUserId < strangeeId) {
+              roomName = myUserId + strangeeId;
+            } else {
+              roomName = strangeeId + myUserId;
+            }
+
+            const blockData = {
+              blockedBy: myUserId,
+              blockedUser: strangeeId,
+              status: !blockedStatus ? "blocked" : "unblocked",
+            };
+
+            console.log("Block data :::", blockData);
+
+            return io
+              .to(roomName)
+              .emit("blockStatusChange", JSON.stringify(blockData));
           }
         });
       } else {
         return res.status(200).json({
-          userId: req.query._id,
+          userId: strangeeId,
           error: true,
           blockedStatus: blockedStatus,
         });
@@ -701,7 +765,7 @@ app.post("/block", ensureAuthorized, (req, res) => {
     .catch((err) => {
       console.log(err);
       return res.status(200).json({
-        userId: req.query._id,
+        userId: strangeeId,
         error: true,
         blockedStatus: blockedStatus,
       });
@@ -839,7 +903,7 @@ app.get("/chat", ensureAuthorized, async (req, res) => {
                 console.log(e);
               }
             }
-          
+
             res
               .status(200)
               .json(
@@ -851,11 +915,70 @@ app.get("/chat", ensureAuthorized, async (req, res) => {
   });
 });
 
-app.post("/token_test", ensureAuthorized, (req, res) => {
-  res.status(200).json({
-    unique_data: req.user_unique_data,
+app.post("/tokenCheck", (req, res) => {
+  const decodedToken = jwt.decode(req.body.token);
+  const payload = {
+    _id: decodedToken._id,
+    email: decodedToken.email,
+  };
+
+  const token = jwt.sign(payload, process.env.JWT_KEY, {
+    expiresIn: JWT_EXPIRATION_PERIOD,
+  });
+  const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_KEY);
+
+  jwt.verify(req.body.token, process.env.JWT_KEY, (err, jwt_data) => {
+    if (err) {
+      // check refresh token: if valid send new token and refresh token else send authorized = false
+      jwt.verify(
+        req.body.refreshToken,
+        process.env.JWT_REFRESH_KEY,
+        (error, refresh_jwt_data) => {
+          if (error) {
+            // check refresh token: if valid send new token and refresh token else send authorized = false
+            res.status(200).json({
+              authorized: false,
+              restartOnTokenChange: true,
+              token: req.body.token,
+              refreshToken: req.body.refreshToken,
+            });
+          } else {
+            // send new tokens
+            res.status(200).json({
+              authorized: true,
+              restartOnTokenChange: true,
+              token: token,
+              refreshToken: refreshToken,
+            });
+          }
+        }
+      );
+    } else {
+      // check validity period: if validity > 7 days, send same tokens else send new rokens
+      if (decodedToken.exp * 1000 < Date.now() + JWT_CHANGE_PERIOD) {
+        console.log("LESS THAN 7D");
+        res.status(200).json({
+          authorized: true,
+          restartOnTokenChange:
+            decodedToken.exp * 1000 < Date.now() + JWT_APP_RESTART_PERIOD,
+          token: token,
+          refreshToken: refreshToken,
+        });
+      } else {
+        console.log("MORE THAN 7D");
+        res.status(200).json({
+          authorized: true,
+          restartOnTokenChange: false,
+          token: req.body.token,
+          refreshToken: req.body.refreshToken,
+        });
+      }
+    }
   });
 });
+
+// For new JWT key:
+// console.log(require("crypto").randomBytes(64).toString("hex"));
 
 // Access token implemented
 // Also need to implement refresh token to refresh access token without requiring user to log-out
@@ -976,12 +1099,15 @@ connection.once("open", () => {
       const strangeeId = data.strangeeId.toString();
 
       jwtVerify(data.token, (userId) => {
-        Chat.updateOne({
-          userId: userId,
-          strangeeId: strangeeId
-        }, {
-          isRead: true
-        }).exec();
+        Chat.updateOne(
+          {
+            userId: userId,
+            strangeeId: strangeeId,
+          },
+          {
+            isRead: true,
+          }
+        ).exec();
       });
     });
 
