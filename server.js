@@ -4,14 +4,23 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
+const ejs = require("ejs");
+const fs = require("fs");
 const app = express();
 const server = require("http").createServer(app);
 const io = require("socket.io")(server);
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 app.use("/uploads", express.static("uploads"));
+app.use("/images", express.static("images"));
+app.set("view engine", "ejs");
 
 const { User, Report, Message, Chat } = require(__dirname + "/schema.js");
+const emailContent = fs.readFileSync(
+  __dirname + "/views/reset_password_email.ejs",
+  "utf8"
+);
 const saltRounds = 10;
 const FIND_STRANGEE_PAGINATION = 30;
 const FIND_STRANGEE_AGE_RADIUS = 10 * 365 * 86400 * 1000;
@@ -19,6 +28,7 @@ const MESSAGE_PAGINATION = 20;
 const JWT_EXPIRATION_PERIOD = "30d";
 const JWT_CHANGE_PERIOD = 7 * 86400000;
 const JWT_APP_RESTART_PERIOD = 86400000 / 3;
+const RESET_PASSWORD_LINK_EXPIRATION = "15m";
 const GENDERS = ["Female", "Male", "Other"];
 const statusData = {};
 
@@ -915,6 +925,133 @@ app.get("/chat", ensureAuthorized, async (req, res) => {
   });
 });
 
+app.get("/terms_of_service", (req, res) => {
+  res.render("terms_of_service", {
+    appName: process.env.APP_NAME,
+    emailAddress: process.env.EMAIL_ADDRESS,
+  });
+});
+
+app.get("/privacy_policy", (req, res) => {
+  res.render("privacy_policy", {
+    appName: process.env.APP_NAME,
+    emailAddress: process.env.EMAIL_ADDRESS,
+  });
+});
+
+app.post("/forgotPassword", (req, res) => {
+  console.log("Email for reset link: ", req.query.email);
+
+  User.findOne({ email: req.query.email }, (err, user) => {
+    if (err) {
+      console.log(err);
+      res.status(500).json({
+        userFound: true,
+        emailSent: false,
+      });
+    } else {
+      if (user) {
+        // Send reset link to req.query.email
+        const secret = process.env.JWT_FORGOT_PASSWORD_KEY + user.password;
+        const payload = {
+          _id: user._id,
+          email: user.email,
+        };
+
+        const token = jwt.sign(payload, secret, { expiresIn: RESET_PASSWORD_LINK_EXPIRATION });
+        const link =
+          process.env.SERVER_URL + `/reset-password/${user._id}/${token}`;
+
+        const emailTemplate = ejs.render(emailContent, {
+          appName: process.env.APP_NAME,
+          resetLink: link
+        });
+        console.log(link);
+
+        res.status(200).json({
+          userFound: true,
+          emailSent: true,
+        });
+      } else {
+        res.status(200).json({
+          userFound: false,
+          emailSent: false,
+        });
+      }
+    }
+  });
+});
+
+app.get("/reset-password/:id/:token", (req, res) => {
+  const { id, token } = req.params;
+
+  User.findOne({ _id: id }, (err, user) => {
+    if (err) {
+      console.log(err);
+      res.render("message", { message: "An unexpected error occured. Please try again!", success: false, appName: process.env.APP_NAME });
+    } else {
+      if (user) {
+        const secret = process.env.JWT_FORGOT_PASSWORD_KEY + user.password;
+
+        try {
+          const payload = jwt.verify(token, secret);
+          res.render("reset-password", { email: user.email, appName: process.env.APP_NAME });
+        } catch (error) {
+          console.log(error.message);
+          res.render("message", { message: "The reset link is incorrect or has expired. Please try again!", success: false, appName: process.env.APP_NAME });
+        }
+      } else {
+        res.render("message", { message: "Invalid credentials. Please try again!", success: false, appName: process.env.APP_NAME });
+      }
+    }
+  });
+});
+
+app.post("/reset-password/:id/:token", (req, res) => {
+  const { id, token } = req.params;
+  const { password, password2 } = req.body;
+
+  User.findOne({ _id: id }, (err, user) => {
+    if (err) {
+      console.log(err);
+      res.render("message", { message: "An unexpected error occured. Please try again!", success: false, appName: process.env.APP_NAME });
+    } else {
+      if (user) {
+        const secret = process.env.JWT_FORGOT_PASSWORD_KEY + user.password;
+
+        try {
+          const payload = jwt.verify(token, secret);
+
+          if (password.length < 6 || password != password2) {
+            return res.render("message", { message: "Entered details are invalid. Please try again!", success: false, appName: process.env.APP_NAME });
+          } else {
+            bcrypt.hash(password, saltRounds, (hashingError, hash) => {
+              if (hashingError) {
+                return res.render("message", { message: "An unexpected error occured. Please try again!", success: false, appName: process.env.APP_NAME });
+              } else {
+                user.password = hash;
+                user.save((saveError, savedUser) => {
+                  if (saveError) {
+                    console.log(saveError);
+                    return res.render("message", { message: "An unexpected error occured. Please try again!", success: false, appName: process.env.APP_NAME });
+                  } else {
+                    return res.render("message", { message: "Hurray! Your password has been successfully changed.", success: true, appName: process.env.APP_NAME });
+                  }
+                });
+              }
+            });
+          }
+        } catch (error) {
+          console.log(error.message);
+          res.render("message", { message: "The reset link is incorrect or has expired. Please try again!", success: false, appName: process.env.APP_NAME });
+        }
+      } else {
+        res.render("message", { message: "Invalid credentials. Please try again!", success: false, appName: process.env.APP_NAME });
+      }
+    }
+  });
+});
+
 app.post("/tokenCheck", (req, res) => {
   const decodedToken = jwt.decode(req.body.token);
   const payload = {
@@ -980,8 +1117,8 @@ app.post("/tokenCheck", (req, res) => {
 // For new JWT key:
 // console.log(require("crypto").randomBytes(64).toString("hex"));
 
-// Access token implemented
-// Also need to implement refresh token to refresh access token without requiring user to log-out
+// Access token and refresh token implemented
+// Also need to implement refresh token in database
 // Tutorial: https://www.youtube.com/watch?v=mbsmsi7l3r4
 function ensureAuthorized(req, res, next) {
   console.log("Checking authorization...");
