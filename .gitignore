@@ -1,5 +1,8 @@
 #uploads
-uploads/
+uploads/*
+
+# exception to the rule (to also deploy empty uploads folder)
+!uploads/.gitkeep 
 
 # Logs
 logs

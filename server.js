@@ -1210,7 +1210,6 @@ connection.once("open", () => {
             error: "Requested resource is forbidden",
           });
         } else {
-          console.log("Valid authorization...", bearerToken);
           req.user_unique_data = jwt_data;
           next();
         }
