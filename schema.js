@@ -82,3 +82,8 @@ module.exports.User = mongoose.model("User", userSchema);
 module.exports.Report = mongoose.model("Report", reportSchema);
 module.exports.Message = mongoose.model("Message", messageSchema);
 module.exports.Chat = mongoose.model("Chat", chatSchema);
+
+
+  // For gmail SMTP:
+	// Enable less secure apps: https://myaccount.google.com/lesssecureapps
+	// Enable less secure sign in: https://accounts.google.com/b/0/DisplayUnlockCaptcha
