@@ -205,7 +205,7 @@ connection.once("open", () => {
   );
 
   app.post("/signup", upload.single("profileImage"), (req, res) => {
-    console.log("file", req.file);
+    req.body.email = req.body.email.toLowerCase();
 
     if (req.body.password.length < 6) {
       return res.status(500).json({
@@ -307,6 +307,8 @@ connection.once("open", () => {
 
 
   app.post("/login", (req, res) => {
+    req.body.email = req.body.email.toLowerCase();
+
     User.find({ email: req.body.email })
       .exec()
       .then((users) => {
