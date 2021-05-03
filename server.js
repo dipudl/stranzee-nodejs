@@ -133,8 +133,8 @@ const connection = mongoose.connection;
 
 connection.once("open", () => {
   app.post("/check_registration", (req, res) => {
+    req.body.email = req.body.email.toLowerCase();
     let exists = false;
-    console.log(req.body);
 
     User.findOne({ email: req.body.email })
       .exec()
