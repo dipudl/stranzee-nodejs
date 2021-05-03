@@ -7,13 +7,15 @@ const multer = require("multer");
 const ejs = require("ejs");
 const fs = require("fs");
 const nodemailer = require("nodemailer");
+var admin = require("firebase-admin");
+const uuid = require("uuid-v4");
 const app = express();
 const server = require("http").createServer(app);
 const io = require("socket.io")(server);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.use("/uploads", express.static("uploads"));
+// app.use("/uploads", express.static("uploads"));
 app.use("/images", express.static("images"));
 app.set("view engine", "ejs");
 
@@ -22,6 +24,24 @@ const emailContent = fs.readFileSync(
   __dirname + "/views/reset_password_email.ejs",
   "utf8"
 );
+
+const serviceAccount = {
+  type: "service_account",
+  project_id: process.env.FIREBASE_PROJECT_ID,
+  private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+  private_key: process.env.FIREBASE_PRIVATE_KEY,
+  client_email: process.env.FIREBASE_CLIENT_EMAIL,
+  client_id: process.env.FIREBASE_CLIENT_ID,
+  auth_uri: "https://accounts.google.com/o/oauth2/auth",
+  token_uri: "https://oauth2.googleapis.com/token",
+  auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+  client_x509_cert_url: process.env.FIREBASE_CLIENT_X509_CERT_URL,
+};
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: `${process.env.FIREBASE_PROJECT_ID}.appspot.com`,
+});
+
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 465,
@@ -130,14 +150,41 @@ connection.once("open", () => {
       });
   });
 
+  function uploadFile(file) {
+    const metadata = {
+      metadata: {
+        // This line is very important. It's to create a download token.
+        firebaseStorageDownloadTokens: uuid(),
+      },
+      contentType: file.mimetype,
+      cacheControl: "public, max-age=31536000",
+    };
+
+    const filepath = `./uploads/${file.filename}`;
+    return admin
+      .storage()
+      .bucket()
+      .upload(filepath, {
+        destination: `uploads/${file.filename}`,
+        // Support for HTTP requests made with `Accept-Encoding: gzip`
+        gzip: true,
+        metadata: metadata,
+      });
+  }
+
   app.post(
     "/profileImage",
     ensureAuthorized,
     upload.single("profileImage"),
     (req, res) => {
-      console.log(req.file);
-      console.log("ID:::", req.body._id);
-      res.status(200).send(true);
+      uploadFile(req.file)
+        .then(() => {
+          res.status(200).send(true);
+        })
+        .catch((error) => {
+          console.log("Upload error :::", error);
+          res.status(200).send(false);
+        });
     }
   );
 
@@ -146,13 +193,18 @@ connection.once("open", () => {
     ensureAuthorized,
     upload.single("imageByUser"),
     (req, res) => {
-      console.log(req.file);
-      res.status(200).json(`uploads/${req.file.filename}`);
+      uploadFile(req.file)
+        .then(() => {
+          res.status(200).json(`uploads/${req.file.filename}`);
+        })
+        .catch((error) => {
+          console.log("Upload error :::", error);
+          res.status(500).json(`uploads/${req.file.filename}`);
+        });
     }
   );
 
   app.post("/signup", upload.single("profileImage"), (req, res) => {
-    console.log("signup", req.body);
     console.log("file", req.file);
 
     if (req.body.password.length < 6) {
@@ -169,75 +221,90 @@ connection.once("open", () => {
             message: "Email already exists",
           });
         } else {
-          bcrypt.hash(req.body.password, saltRounds, (err, hash) => {
-            if (err) {
-              return res.status(500).json({
-                error: err,
-              });
-            } else {
-              console.log("profileImageName", req.profileImageName);
-
-              const user = new User({
-                _id: req.profileId,
-                email: req.body.email,
-                password: hash,
-                firstName: req.body.firstName,
-                lastName: req.body.lastName,
-                imageUrl: `uploads/${req.file.filename}`,
-                country: req.body.country,
-                gender: req.body.gender,
-                interestedIn: req.body.interestedIn.split(","),
-                interestedInCaps: req.body.interestedIn
-                  .split(",")
-                  .map((interest) => interest.toUpperCase()),
-                birthday: req.body.birthday,
-                aboutMe: req.body.aboutMe,
-              });
-
-              user
-                .save()
-                .then((result) => {
-                  console.log(result);
-                  result.password = undefined;
-                  result.interestedInCaps = undefined;
-
-                  const token = jwt.sign(
-                    {
-                      _id: result._id,
-                      email: result.email,
-                    },
-                    process.env.JWT_KEY,
-                    {
-                      expiresIn: JWT_EXPIRATION_PERIOD,
-                    }
-                  );
-
-                  const refreshToken = jwt.sign(
-                    {
-                      _id: result._id,
-                      email: result.email,
-                    },
-                    process.env.JWT_REFRESH_KEY
-                  );
-
-                  return res.status(201).json({
-                    message: "User created",
-                    data: result,
-                    token: token,
-                    refreshToken: refreshToken,
-                  });
-                })
-                .catch((err) => {
-                  console.log(err);
-                  res.status(500).json({
+          uploadFile(req.file)
+            .then(() => {
+              bcrypt.hash(req.body.password, saltRounds, (err, hash) => {
+                if (err) {
+                  return res.status(500).json({
                     error: err,
                   });
-                });
-            }
-          });
+                } else {
+                  console.log("profileImageName", req.profileImageName);
+
+                  const user = new User({
+                    _id: req.profileId,
+                    email: req.body.email,
+                    password: hash,
+                    firstName: req.body.firstName,
+                    lastName: req.body.lastName,
+                    imageUrl: `uploads/${req.file.filename}`,
+                    country: req.body.country,
+                    gender: req.body.gender,
+                    interestedIn: req.body.interestedIn.split(","),
+                    interestedInCaps: req.body.interestedIn
+                      .split(",")
+                      .map((interest) => interest.toUpperCase()),
+                    birthday: req.body.birthday,
+                    aboutMe: req.body.aboutMe,
+                  });
+
+                  user
+                    .save()
+                    .then((result) => {
+                      console.log(result);
+                      result.password = undefined;
+                      result.interestedInCaps = undefined;
+
+                      const token = jwt.sign(
+                        {
+                          _id: result._id,
+                          email: result.email,
+                        },
+                        process.env.JWT_KEY,
+                        {
+                          expiresIn: JWT_EXPIRATION_PERIOD,
+                        }
+                      );
+
+                      const refreshToken = jwt.sign(
+                        {
+                          _id: result._id,
+                          email: result.email,
+                        },
+                        process.env.JWT_REFRESH_KEY
+                      );
+
+                      return res.status(201).json({
+                        message: "User created",
+                        data: result,
+                        token: token,
+                        refreshToken: refreshToken,
+                      });
+                    })
+                    .catch((err) => {
+                      console.log(err);
+                      res.status(500).json({
+                        error: err,
+                      });
+                    });
+                }
+              });
+            })
+            .catch((error) => {
+              console.log("Upload error :::", error);
+              return res.status(500).json({
+                error: "Failed to upload profile picture",
+              });
+            });
         }
       });
   });
+
+
+  app.get("/uploads/:fileId", (req, res) => {
+    res.redirect(process.env.FIREBASE_BASE_IMAGE_URL + req.params.fileId + "?alt=media");
+  });
+
 
   app.post("/login", (req, res) => {
     User.find({ email: req.body.email })
