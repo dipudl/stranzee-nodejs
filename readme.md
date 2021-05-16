@@ -1,10 +1,10 @@
-# Stranzee: Chat & Meet Strangers
+# Node.js server for "Stranzee: Chat & Meet Strangers" app
 
-An android app to discover, chat and connect with strangers and make new friends worldwide without any restriction!
+An app to discover, chat and connect with strangers and make new friends worldwide without any restriction!
 
-[![get it on google play](https://drive.google.com/uc?export=view&id=1ntJySfXaTivjkNOF3iVNX-YmKac3kKPB)](https://play.google.com/store/apps/details?id=com.leminect.stranzee)
+[![get app on google play](https://drive.google.com/uc?export=view&id=1ntJySfXaTivjkNOF3iVNX-YmKac3kKPB)](https://play.google.com/store/apps/details?id=com.leminect.stranzee)
 
-Some screens:
+Some app screens:
 
 ![App mockup](https://drive.google.com/uc?export=view&id=1PdWwzcpVAYGeMHgAVqP7bcziQS111C-v)
 
@@ -12,24 +12,25 @@ Some screens:
 
 These instructions will get you a copy of the project up and running on your local machine for development and testing purposes.
 
+[**Click here for Android app code**](https://github.com/dou-d/stranzee.git)
+
 ### Prerequisites
 
-What things you need to install for building and running the app
+What things you need to install for running the server
 
 ```
-Android Studio
+Node.js
 ```
 ```
-Node.js & MongoDB for server-side
+MongoDB
 ```
-[Click here for server code & implementation guidelines](https://github.com/dou-d/stranzee-nodejs)
 
 ### Installing & getting started
 
-Clone this project and open with Android studio
+Clone this project and open with Visual Studio Code(preferred) or any text editor
 
 ```
-git clone https://github.com/dou-d/stranzee.git
+git clone https://github.com/dou-d/stranzee-nodejs.git
 ```
 
 Start MongoDB server ([click here for full instructions](https://www.tutorialkart.com/mongodb/start-mongodb-server/))
@@ -38,7 +39,7 @@ Start MongoDB server ([click here for full instructions](https://www.tutorialkar
 mongod
 ```
 
-And start the node.js server
+And start the node.js server (currently at port 3000)
 
 ```
 node server.js
@@ -46,9 +47,9 @@ node server.js
 
 ## Built With
 
-* [Kotlin](https://kotlinlang.org/) - The programming language used
-* [Maven](https://maven.apache.org/) - Dependency Management
-* [Socket.io Client](https://github.com/socketio/socket.io-client-java) - Used for realtime communications like chat
+* [Node.js](https://nodejs.org/en/) - For programming the server
+* [npm](https://www.npmjs.com/) - Package Manager
+* [Socket.io library](https://socket.io/) - Used for realtime communications like chat
 
 ## Contributing
 
