@@ -501,7 +501,7 @@ connection.once("open", () => {
           }
         } else {
           return res.status(401).json({
-            error: err,
+            error: "An error occured!",
           });
         }
       });
@@ -1368,6 +1368,14 @@ connection.once("open", () => {
           upsert: true,
         }).exec();
 
+        io.to(strangeeId + "notification").emit("notification", {
+          title: "New message",
+          message: data.message.type == "image"? "Sent a photo.": data.message.text.slice(0, 100),
+          senderId: userId,
+          receiverId: strangeeId,
+          type: "chat"
+        });
+
         console.log(data.message);
       });
     });
@@ -1410,6 +1418,8 @@ connection.once("open", () => {
           } else {
             roomName = strangeeId + userId;
           }
+        } else if (data.purpose == "notification") {
+          roomName = userId + "notification";
         }
 
         socket.join(roomName);
@@ -1432,6 +1442,8 @@ connection.once("open", () => {
           } else {
             roomName = strangeeId + userId;
           }
+        } else if (data.purpose == "notification") {
+          roomName = userId + "notification";
         }
 
         socket.leave(roomName);
