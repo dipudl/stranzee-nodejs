@@ -951,7 +951,7 @@ connection.once("open", () => {
 
   app.get("/chat", ensureAuthorized, async (req, res) => {
     User.findOne({ _id: req.user_unique_data._id }, async (err, user) => {
-      if (err) {
+      if (err || !user) {
         console.log(err);
         res.status(500).json({
           error: err,
