@@ -29,7 +29,7 @@ const serviceAccount = {
   type: "service_account",
   project_id: process.env.FIREBASE_PROJECT_ID,
   private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-  private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
   client_email: process.env.FIREBASE_CLIENT_EMAIL,
   client_id: process.env.FIREBASE_CLIENT_ID,
   auth_uri: "https://accounts.google.com/o/oauth2/auth",
@@ -60,7 +60,9 @@ const JWT_CHANGE_PERIOD = 7 * 86400000;
 const JWT_APP_RESTART_PERIOD = 86400000 / 3;
 const RESET_PASSWORD_LINK_EXPIRATION = "15m";
 const GENDERS = ["Female", "Male", "Other"];
-const statusData = {};
+const statusData = {} /* To get user's status without querying DB */,
+  usersFcmToken =
+    {}; /* To get user's FCM token without querying DB each time (Stored after first DB query)*/
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -246,6 +248,7 @@ connection.once("open", () => {
                       .map((interest) => interest.toUpperCase()),
                     birthday: req.body.birthday,
                     aboutMe: req.body.aboutMe,
+                    fcmToken: req.body.fcmToken,
                   });
 
                   user
@@ -300,11 +303,11 @@ connection.once("open", () => {
       });
   });
 
-
   app.get("/uploads/:fileId", (req, res) => {
-    res.redirect(process.env.FIREBASE_BASE_IMAGE_URL + req.params.fileId + "?alt=media");
+    res.redirect(
+      process.env.FIREBASE_BASE_IMAGE_URL + req.params.fileId + "?alt=media"
+    );
   });
-
 
   app.post("/login", (req, res) => {
     req.body.email = req.body.email.toLowerCase();
@@ -319,42 +322,51 @@ connection.once("open", () => {
         }
 
         bcrypt.compare(req.body.password, users[0].password, (err, result) => {
-          if (err) {
+          if (err || !result) {
             return res.status(401).json({
               message: "Authentication failed",
             });
           }
-          if (result) {
-            users[0].password = undefined;
+          const token = jwt.sign(
+            {
+              _id: users[0]._id,
+              email: users[0].email,
+            },
+            process.env.JWT_KEY,
+            {
+              expiresIn: JWT_EXPIRATION_PERIOD,
+            }
+          );
 
-            const token = jwt.sign(
-              {
-                _id: users[0]._id,
-                email: users[0].email,
-              },
-              process.env.JWT_KEY,
-              {
-                expiresIn: JWT_EXPIRATION_PERIOD,
+          const refreshToken = jwt.sign(
+            {
+              _id: users[0]._id,
+              email: users[0].email,
+            },
+            process.env.JWT_REFRESH_KEY
+          );
+
+          users[0].fcmToken = req.body.fcmToken;
+
+          users[0].save((error, savedUser) => {
+            if (error) {
+              console.log("FCM TOken save error", error);
+              return res.status(500).json({
+                error: err,
+              });
+            } else {
+              if (usersFcmToken[savedUser._id]) {
+                delete usersFcmToken[savedUser._id];
               }
-            );
 
-            const refreshToken = jwt.sign(
-              {
-                _id: users[0]._id,
-                email: users[0].email,
-              },
-              process.env.JWT_REFRESH_KEY
-            );
-
-            return res.status(200).json({
-              message: "Authentication successful",
-              data: users[0],
-              token: token,
-              refreshToken: refreshToken,
-            });
-          }
-          return res.status(401).json({
-            message: "Authentication failed",
+              savedUser.password = undefined;
+              return res.status(200).json({
+                message: "Authentication successful",
+                data: savedUser,
+                token: token,
+                refreshToken: refreshToken,
+              });
+            }
           });
         });
       })
@@ -442,10 +454,8 @@ connection.once("open", () => {
       .then((user) => {
         if (user) {
           req.favouriteArray = user.favourite;
-          console.log("Filter on type:", typeof req.query.filterOn);
 
           if (req.query.filterOn == "true") {
-            console.log("Filter on");
             let otherFilters = "{";
             if (req.body.country != null && req.body.country != "Worldwide") {
               otherFilters += `"country": "${req.body.country}"`;
@@ -467,7 +477,6 @@ connection.once("open", () => {
               null
             );
           } else {
-            console.log("Filter off");
             filterStrangee(
               JSON.parse(strangee_query),
               {
@@ -988,7 +997,6 @@ connection.once("open", () => {
                     chats[i].aboutMe = strangee.aboutMe;
 
                     filteredChatArray.push(chats[i]);
-                    console.log(chats[i]);
                   }
                 } catch (e) {
                   console.log(e);
@@ -1198,6 +1206,28 @@ connection.once("open", () => {
     });
   });
 
+  app.post("/refreshFcmToken", ensureAuthorized, (req, res) => {
+    console.log("Query:", req.query);
+    User.findOne({ _id: req.user_unique_data._id }, (err, user) => {
+      if (err || !user) {
+        res.status(200).send(false);
+      } else {
+        user.fcmToken = req.query.fcmToken;
+        user.save((error, savedUser) => {
+          if (error) {
+            res.status(200).send(false);
+          } else {
+            res.status(200).send(true);
+
+            if (usersFcmToken[req.user_unique_data._id]) {
+              delete usersFcmToken[req.user_unique_data._id];
+            }
+          }
+        });
+      }
+    });
+  });
+
   app.post("/tokenCheck", (req, res) => {
     const decodedToken = jwt.decode(req.body.token);
     const payload = {
@@ -1239,7 +1269,6 @@ connection.once("open", () => {
       } else {
         // check validity period: if validity > 7 days, send same tokens else send new rokens
         if (decodedToken.exp * 1000 < Date.now() + JWT_CHANGE_PERIOD) {
-          console.log("LESS THAN 7D");
           res.status(200).json({
             authorized: true,
             restartOnTokenChange:
@@ -1248,7 +1277,6 @@ connection.once("open", () => {
             refreshToken: refreshToken,
           });
         } else {
-          console.log("MORE THAN 7D");
           res.status(200).json({
             authorized: true,
             restartOnTokenChange: false,
@@ -1259,6 +1287,46 @@ connection.once("open", () => {
       }
     });
   });
+
+  function sendChatNotification(data, userId, strangeeId, fcmToken) {
+    const payload = {
+      // "notification" is used when app is in background. Firebase displays this notification.
+      notification: {
+        title: "New message",
+        body:
+          data.message.type == "image"
+            ? "Someone sent a photo."
+            : data.message.text.slice(0, 100),
+        image: process.env.FIREBASE_BASE_IMAGE_URL + userId + "?alt=media",
+      },
+
+      // "data" is used when app is in foreground. We need to display this with the help of data.
+      data: {
+        title: "New message",
+        body:
+          data.message.type == "image"
+            ? "Someone sent a photo."
+            : data.message.text.slice(0, 100),
+        senderId: userId,
+        receiverId: strangeeId,
+        notificationType: "chat",
+      },
+    };
+
+    admin
+      .messaging()
+      .sendToDevice(fcmToken, payload, {
+        collapseKey: "stranzee_notif",
+        priority: "high",
+        timeToLive: 60 * 60 * 24 * 2 /* 2 days */,
+      })
+      .then((response) => {
+        // notification sent successfully
+      })
+      .catch((error) => {
+        console.log("Notification error", error);
+      });
+  }
 
   // For new JWT key:
   // console.log(require("crypto").randomBytes(64).toString("hex"));
@@ -1333,8 +1401,6 @@ connection.once("open", () => {
         const message = new Message(data.message);
         message.save();
 
-        console.log("Room :::", roomName);
-
         const myChat = {
           _id: userId + strangeeId,
           userId: userId,
@@ -1368,15 +1434,43 @@ connection.once("open", () => {
           upsert: true,
         }).exec();
 
-        io.to(strangeeId + "notification").emit("notification", {
+        /* io.to(strangeeId + "notification").emit("notification", {
           title: "New message",
-          message: data.message.type == "image"? "Sent a photo.": data.message.text.slice(0, 100),
+          message:
+            data.message.type == "image"
+              ? "Sent a photo."
+              : data.message.text.slice(0, 100),
           senderId: userId,
           receiverId: strangeeId,
-          type: "chat"
-        });
+          notificationType: "chat",
+        }); */
 
-        console.log(data.message);
+        if (
+          usersFcmToken[userId] &&
+          Date.now() - usersFcmToken[userId]["time"] < 3600000 /* 1 hour */
+        ) {
+          sendChatNotification(
+            data,
+            userId,
+            strangeeId,
+            usersFcmToken[userId]["fcmToken"]
+          );
+        } else {
+          User.findOne({ _id: strangeeId }, (err, user) => {
+            if (err || !user) {
+              console.log(err);
+            } else {
+              if (user.fcmToken) {
+                usersFcmToken[userId] = {
+                  fcmToken: user.fcmToken,
+                  time: Date.now(),
+                };
+
+                sendChatNotification(data, userId, strangeeId, user.fcmToken);
+              }
+            }
+          });
+        }
       });
     });
 
@@ -1394,6 +1488,8 @@ connection.once("open", () => {
             isRead: true,
           }
         ).exec();
+
+        console.log(`Username : ${userId} is in chat with: ${strangeeId}`);
       });
     });
 
@@ -1447,7 +1543,7 @@ connection.once("open", () => {
         }
 
         socket.leave(roomName);
-        console.log(`Username : ${userId} leaved Room Name : ${roomName}`);
+        console.log(`Username : ${userId} left Room Name : ${roomName}`);
       });
     });
   });

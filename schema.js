@@ -28,6 +28,7 @@ const userSchema = new mongoose.Schema(
     favourite: { type: [String], default: [] },
     blocked: { type: [String], default: [] },
     whoCheckedMe: { type: [String], default: [] },
+    fcmToken: { type: String, require: false },
   },
   { timestamps: true }
 );
@@ -63,7 +64,7 @@ const chatSchema = new mongoose.Schema(
     imageUrl: { type: String, required: true },
     timestamp: { type: Number, required: true },
     message: { type: String, required: true },
-    isRead: { type: Boolean, required: true, default: false},
+    isRead: { type: Boolean, required: true, default: false },
 
     // not required, fetched when needed (for fresh data)
     firstName: { type: String, required: false },
@@ -73,7 +74,7 @@ const chatSchema = new mongoose.Schema(
     interestedIn: { type: [String], required: false },
     birthday: { type: Number, required: false },
     aboutMe: { type: String, required: false },
-    isOnline: { type: Boolean, required: false}
+    isOnline: { type: Boolean, required: false },
   },
   { timestamps: true }
 );
@@ -83,7 +84,6 @@ module.exports.Report = mongoose.model("Report", reportSchema);
 module.exports.Message = mongoose.model("Message", messageSchema);
 module.exports.Chat = mongoose.model("Chat", chatSchema);
 
-
-  // For gmail SMTP:
-	// Enable less secure apps: https://myaccount.google.com/lesssecureapps
-	// Enable less secure sign in: https://accounts.google.com/b/0/DisplayUnlockCaptcha
+// For gmail SMTP:
+// Enable less secure apps: https://myaccount.google.com/lesssecureapps
+// Enable less secure sign in: https://accounts.google.com/b/0/DisplayUnlockCaptcha
