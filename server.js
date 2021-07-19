@@ -378,7 +378,14 @@ connection.once("open", () => {
       });
   });
 
-  function filterStrangee(filterJson1, filterJson2, req, res, callback) {
+  function filterStrangee(
+    filterJson1,
+    filterJson2,
+    isFilterEnabled,
+    req,
+    res,
+    callback
+  ) {
     User.find(filterJson1)
       .find(filterJson2)
       .find({ _id: { $ne: req.user_unique_data._id } })
@@ -408,6 +415,7 @@ connection.once("open", () => {
                 data: users.map((element) => calcSaved(element, req)),
                 createdAt:
                   users.length > 0 ? users[users.length - 1].createdAt : null,
+                isFilterEnabled: isFilterEnabled,
               });
             }
           } else if (total_found >= FIND_STRANGEE_PAGINATION) {
@@ -420,6 +428,7 @@ connection.once("open", () => {
               data: users.map((element) => calcSaved(element, req)),
               createdAt:
                 users.length > 0 ? users[users.length - 1].createdAt : null,
+              isFilterEnabled: isFilterEnabled,
             });
           }
         }
@@ -472,6 +481,7 @@ connection.once("open", () => {
             filterStrangee(
               JSON.parse(strangee_query),
               JSON.parse(otherFilters),
+              true,
               req,
               res,
               null
@@ -486,6 +496,7 @@ connection.once("open", () => {
                   $lte: parseInt(req.body.birthday) + FIND_STRANGEE_AGE_RADIUS,
                 },
               },
+              false,
               req,
               res,
               () => {
@@ -499,10 +510,11 @@ connection.once("open", () => {
                     },
                   },
                   null,
+                  false,
                   req,
                   res,
                   () => {
-                    filterStrangee(null, null, req, res, null);
+                    filterStrangee(null, null, false, req, res, null);
                   }
                 );
               }
