@@ -12,6 +12,10 @@ const uuid = require("uuid-v4");
 const app = express();
 const server = require("http").createServer(app);
 const io = require("socket.io")(server);
+const mailgun = require("mailgun-js")({
+  apiKey: process.env.MAILGUN_API_KEY,
+  domain: process.env.MAILGUN_DOMAIN,
+});
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -1070,6 +1074,8 @@ connection.once("open", () => {
             resetLink: link,
           });
 
+          /* 
+          // For gmail
           const mailOptions = {
             from: `${process.env.APP_NAME} <${process.env.GMAIL}>`, // Something like: Jane Doe <janedoe@gmail.com>
             to: req.query.email,
@@ -1090,7 +1096,32 @@ connection.once("open", () => {
                 emailSent: true,
               });
             }
+          }); */
+
+          // For Mailgun
+          const data = {
+            from: `${process.env.APP_NAME} <${process.env.MAILGUN_EMAIL}>`,
+            to: req.query.email,
+            subject: `Password reset link for ${process.env.APP_NAME}`,
+            html: emailTemplate
+          };
+
+          mailgun.messages().send(data, (erro, body) => {
+            console.log("Body: ", body);
+            if (erro) {
+              console.log("Mail send error:", erro);
+              res.status(200).json({
+                userFound: true,
+                emailSent: false,
+              });
+            } else {
+              res.status(200).json({
+                userFound: true,
+                emailSent: true,
+              });
+            }
           });
+
         } else {
           res.status(200).json({
             userFound: false,
