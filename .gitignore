@@ -1,6 +1,9 @@
 #uploads
 uploads/*
 
+#files
+server-commands.txt
+
 # exception to the rule (to also deploy empty uploads folder)
 !uploads/.gitkeep 
 

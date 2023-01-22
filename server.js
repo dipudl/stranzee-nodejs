@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const ejs = require("ejs");
 const fs = require("fs");
+const path = require("path");
 const nodemailer = require("nodemailer");
 var admin = require("firebase-admin");
 const uuid = require("uuid-v4");
@@ -20,12 +21,13 @@ const mailgun = require("mailgun-js")({
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 // app.use("/uploads", express.static("uploads"));
-app.use("/images", express.static("images"));
+app.use("/images", express.static(path.join(__dirname, "images")));
 app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, 'views'));
 
-const { User, Report, Message, Chat } = require(__dirname + "/schema.js");
+const { User, Report, Message, Chat } = require(path.join(__dirname, "schema.js"));
 const emailContent = fs.readFileSync(
-  __dirname + "/views/reset_password_email.ejs",
+  path.join(__dirname, "views", "reset_password_email.ejs"),
   "utf8"
 );
 
@@ -70,7 +72,7 @@ const statusData = {} /* To get user's status without querying DB */,
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, __dirname + "/uploads/");
+    cb(null, path.join(__dirname, "uploads"));
   },
   filename: (req, file, cb) => {
     // cb(null, file.originalname);
@@ -165,7 +167,7 @@ connection.once("open", () => {
       cacheControl: "public, max-age=31536000",
     };
 
-    const filepath = `./uploads/${file.filename}`;
+    const filepath = path.join(__dirname, "uploads", file.filename);
     return admin
       .storage()
       .bucket()
